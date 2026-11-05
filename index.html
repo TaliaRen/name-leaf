@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1e140c">
+<title>Leaf Letters</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1e140c; }
+  body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+  #stage, #stage canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  #ime {
+    position: fixed; left: 50%; bottom: 40px; width: 1px; height: 1px; margin: 0; overflow: hidden;
+    opacity: 0; border: 0; padding: 0; resize: none; font-size: 16px; color: transparent;
+    background: transparent; caret-color: transparent; outline: none;
+  }
+  /* frosted round buttons, bottom-right, tinted like amber in autumn light */
+  #dock {
+    position: fixed; right: calc(16px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom));
+    display: flex; gap: 8px;
+  }
+  #dock button {
+    width: 42px; height: 42px; padding: 0; border-radius: 50%; cursor: pointer; display: grid; place-items: center;
+    border: 1px solid rgba(255, 210, 160, .22);
+    background: linear-gradient(180deg, rgba(255, 224, 186, .13), rgba(196, 120, 56, .05)), rgba(42, 22, 10, .34);
+    -webkit-backdrop-filter: blur(10px) saturate(1.3); backdrop-filter: blur(10px) saturate(1.3);
+    box-shadow: inset 0 1px 0 rgba(255, 236, 210, .16), 0 0 16px rgba(255, 160, 80, .08);
+    color: rgba(255, 232, 204, .74);
+    transition: color .4s, box-shadow .4s, border-color .4s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #dock button:hover {
+    color: #fff4e4; border-color: rgba(255, 214, 168, .45);
+    box-shadow: inset 0 1px 0 rgba(255, 236, 210, .16), 0 0 18px rgba(255, 168, 86, .32);
+  }
+  #dock button svg { width: 20px; height: 20px; filter: drop-shadow(0 0 3px rgba(255, 178, 96, .5)); }
+  /* intro card: structure and show/hide behaviour only; visual styling is defined separately */
+  #intro {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity var(--intro-fade, .6s), visibility 0s linear var(--intro-fade, .6s);
+  }
+  #intro.show {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transition: opacity var(--intro-fade, .6s), visibility 0s;
+  }
+  /* autumn look: dusk-warm veil, amber-edged card, gold divider */
+  #intro { --intro-fade: .8s; background: radial-gradient(ellipse at 50% 45%, rgba(30, 14, 4, .28), rgba(14, 6, 2, .55)); }
+  /* tips card: title, a fine divider, then one row per gesture */
+  .intro-card {
+    width: 316px; max-width: calc(100vw - 32px); padding: 26px 22px 16px; box-sizing: border-box;
+    border: 1px solid rgba(255, 210, 160, .2); border-radius: 22px;
+    background: linear-gradient(180deg, rgba(255, 214, 160, .08), rgba(150, 70, 20, .04)), rgba(34, 17, 8, .66);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: inset 0 1px 0 rgba(255, 230, 196, .1), 0 18px 50px rgba(10, 4, 1, .45);
+    color: rgba(255, 234, 208, .86); font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    transform: translateY(8px); transition: transform var(--intro-fade) cubic-bezier(.2, .7, .2, 1);
+  }
+  #intro.show .intro-card { transform: none; }
+  /* the title is set in the same serif as the leaves' Latin letters */
+  @font-face { font-family: "LeafTitle"; src: url(fonts/en-SortsMillGoudy.woff) format("woff"); font-display: swap; }
+  .intro-title {
+    margin: 0; text-align: center; font-family: "LeafTitle", -apple-system, "PingFang SC", sans-serif; font-size: 34px; line-height: 1.25; font-weight: 400;
+    letter-spacing: .04em; text-indent: 0;
+    color: #f7dcb0; text-shadow: 0 0 16px rgba(255, 170, 80, .3);
+  }
+  .intro-rule {
+    height: 1px; border: 0; margin: 20px 40px 12px;
+    background: linear-gradient(90deg, rgba(240, 190, 130, 0), rgba(240, 200, 150, .55), rgba(240, 190, 130, 0));
+  }
+  .intro-list { list-style: none; margin: 0; padding: 0 4px; font-size: 14px; }
+  .intro-list li { display: flex; justify-content: space-between; align-items: center; gap: 18px; height: 32.5px; padding: 0 4px; white-space: nowrap; }
+  .intro-list li + li { border-top: 1px solid rgba(255, 220, 180, .1); }
+  .intro-act { color: rgba(255, 238, 218, .92); letter-spacing: .04em; }
+  .intro-eff { color: rgba(255, 220, 185, .5); letter-spacing: .04em; }
+  /* "show tips" button: bottom-left, inside the safe area, above the tips layer so it stays reachable */
+  #btnHelp {
+    position: fixed; left: calc(16px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 101;
+    width: 42px; height: 42px; padding: 0; border-radius: 50%; cursor: pointer; display: grid; place-items: center;
+    border: 1px solid rgba(255, 210, 160, .22);
+    background: linear-gradient(180deg, rgba(255, 224, 186, .13), rgba(196, 120, 56, .05)), rgba(42, 22, 10, .34);
+    -webkit-backdrop-filter: blur(10px) saturate(1.3); backdrop-filter: blur(10px) saturate(1.3);
+    box-shadow: inset 0 1px 0 rgba(255, 236, 210, .16), 0 0 16px rgba(255, 160, 80, .08);
+    color: rgba(255, 232, 204, .74); transition: color .4s, box-shadow .4s, border-color .4s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #btnHelp:hover { color: #fff4e4; border-color: rgba(255, 214, 168, .45); box-shadow: inset 0 1px 0 rgba(255, 236, 210, .16), 0 0 18px rgba(255, 168, 86, .32); }
+  #btnHelp svg { width: 20px; height: 20px; filter: drop-shadow(0 0 3px rgba(255, 178, 96, .5)); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="intro" role="dialog" aria-label="How to play">
+  <div class="intro-card">
+    <h2 class="intro-title">Leaf Letters</h2>
+    <hr class="intro-rule">
+    <ul class="intro-list">
+      <li><span class="intro-act">Type</span><span class="intro-eff">Leaves form letters</span></li>
+      <li><span class="intro-act">Delete</span><span class="intro-eff">Blown away</span></li>
+      <li><span class="intro-act">Tap a letter</span><span class="intro-eff">Crunch</span></li>
+      <li><span class="intro-act">Double-tap</span><span class="intro-eff">Bury</span></li>
+      <li><span class="intro-act">Hold a letter</span><span class="intro-eff">Wither into soil</span></li>
+      <li><span class="intro-act">Tap the ground</span><span class="intro-eff">Drop a pine cone</span></li>
+      <li><span class="intro-act">Drag</span><span class="intro-eff">Leave footprints</span></li>
+    </ul>
+  </div>
+</div>
+<button id="btnHelp" type="button" title="How to play" aria-label="How to play">
+  <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="9" cy="9" r="7.5"/>
+    <path d="M6.9 7a2.1 2.1 0 1 1 3 1.9c-.6.3-.9.8-.9 1.4v.5"/>
+    <path d="M9 13.2h.01"/>
+  </svg>
+</button>
+<div id="dock">
+  <button id="btnKbd" type="button" title="Keyboard" aria-label="Keyboard">
+    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="1.5" y="4.5" width="15" height="9.5" rx="2"/>
+      <path d="M4.5 7.5h.01M7 7.5h.01M9.5 7.5h.01M12 7.5h.01M14 7.5h.01M5.5 10h.01M8 10h.01M10.5 10h.01M13 10h.01"/>
+      <path d="M6 12h6"/>
+    </svg>
+  </button>
+  <button id="btnSave" type="button" title="Save image" aria-label="Save image">
+    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+      <rect x="1.5" y="3.5" width="15" height="11" rx="2"/>
+      <path d="M1.5 12l4.2-4 3.3 3 2.2-2 5.3 4.5"/>
+      <circle cx="12.5" cy="7" r="1.2"/>
+    </svg>
+  </button>
+</div>
+<textarea id="ime" maxlength="32" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="enter" aria-label="Type here"></textarea>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
