@@ -22,6 +22,9 @@ const zhKey = FONTS_ZH[params.get('zh')] ? params.get('zh') : DEFAULT_ZH;
 const enKey = FONTS_EN[params.get('en')] ? params.get('en') : DEFAULT_EN;
 const RES = 192;          // mask resolution per em
 const BASELINE = 0.88;    // baseline position from the top of the em box
+// Room around the em box: descenders (g, p, q, y, j), tall ascenders and brush strokes that run past the box
+// would otherwise be cut off at the canvas edge.
+const PAD_Y = 0.3, PAD_X = 0.15;
 let font = null;          // Chinese font
 let fontEn = null;        // English font (null: use the Chinese font's own Latin)
 let fontPromise = null;
@@ -59,8 +62,9 @@ const isLatin = (ch) => ch.codePointAt(0) < 0x2e80;
 // Rasterize a character into a coverage mask. Returns { mask, adv } where adv is in em.
 function rasterize(ch) {
   const cv = document.createElement('canvas');
-  cv.width = RES * 1.2;
-  cv.height = RES;
+  cv.width = Math.round(RES * (1.2 + PAD_X * 2));
+  cv.height = Math.round(RES * (1 + PAD_Y * 2));
+  const top = RES * PAD_Y; // where the em box starts
   const ctx = cv.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff';
   let adv = 1;
@@ -69,7 +73,7 @@ function rasterize(ch) {
   if (glyph && glyph.index !== 0) {
     adv = (glyph.advanceWidth || f.unitsPerEm) / f.unitsPerEm;
     const ox = (cv.width - adv * RES) / 2;
-    const path = glyph.getPath(ox, RES * BASELINE, RES);
+    const path = glyph.getPath(ox, top + RES * BASELINE, RES);
     path.fill = '#fff';
     path.draw(ctx);
   } else {
@@ -78,7 +82,7 @@ function rasterize(ch) {
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'center';
     adv = Math.min(1.15, Math.max(0.3, ctx.measureText(ch).width / RES));
-    ctx.fillText(ch, cv.width / 2, RES * BASELINE);
+    ctx.fillText(ch, cv.width / 2, top + RES * BASELINE);
   }
   const img = ctx.getImageData(0, 0, cv.width, cv.height).data;
   const w = cv.width, h = cv.height;
@@ -211,7 +215,7 @@ export function glyphTargets(ch, density = 1) {
     const size = strokeEm * (0.66 + rand() * 0.4) / Math.sqrt(density) * (edge > 0.5 ? 0.85 : 1);
     samples.push({
       x: (px - w / 2) / RES,
-      y: (h * 0.5 - py) / RES,
+      y: (h * 0.5 - py) / RES, // the padding is symmetric, so the canvas centre is still the em box centre
       size,
       rot,
       edge,
