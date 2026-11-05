@@ -71,6 +71,14 @@
   }
   .intro-list { list-style: none; margin: 0; padding: 0 4px; font-size: 14px; }
   .intro-list li { display: flex; justify-content: space-between; align-items: center; gap: 18px; height: 32.5px; padding: 0 4px; white-space: nowrap; }
+  /* on a computer screen the card is roomier: wider, with a little more air in each row */
+  @media (min-width: 768px) {
+    .intro-card { width: 440px; padding: 32px 38px 22px; }
+    .intro-title { font-size: 38px; }
+    .intro-rule { margin: 22px 56px 14px; }
+    .intro-list { font-size: 15px; }
+    .intro-list li { height: 36px; padding: 0 8px; }
+  }
   .intro-list li + li { border-top: 1px solid rgba(255, 220, 180, .1); }
   .intro-act { color: rgba(255, 238, 218, .92); letter-spacing: .04em; }
   .intro-eff { color: rgba(255, 220, 185, .5); letter-spacing: .04em; }
