@@ -2,7 +2,7 @@
 import * as THREE from '../vendor/three.module.js';
 import { buildLeafAtlas, COLS, ROWS } from './leafAtlas.js';
 import { loadFont, glyphTargets } from './glyph.js';
-import { paintSoil, makeBackgroundMesh, makeHazeMesh, makeDust, DAPPLE_GLSL, GROUND_GLSL, shared } from './background.js';
+import { paintSoil, makeBackgroundMesh, makeHazeMesh, makeDust, makeGradeMesh, DAPPLE_GLSL, GROUND_GLSL, shared } from './background.js';
 import { createBugs } from './bugs.js';
 import { createSquirrel } from './squirrel.js';
 import { initAudio, playCrunch, playRustle, playSnap, playWind, playStep, playFlyAway, playArrive, playCrinkle, playConeDrop } from './sound.js';
@@ -10,6 +10,8 @@ import { initAudio, playCrunch, playRustle, playSnap, playWind, playStep, playFl
 // ---------------------------------------------------------------- setup
 
 const isMobile = matchMedia('(pointer: coarse)').matches || Math.min(screen.width, screen.height) < 600;
+// on anything with a touch screen the on-screen keyboard only ever comes up from the keyboard button
+const autoFocus = !isMobile && !('ontouchstart' in window) && !(navigator.maxTouchPoints > 0);
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
 const container = document.getElementById('stage');
 const renderer = new THREE.WebGLRenderer({ antialias: DPR < 2, alpha: false, powerPreference: 'high-performance' });
@@ -25,7 +27,7 @@ camera.position.z = 3000;
 const bgMesh = makeBackgroundMesh();
 const haze = makeHazeMesh();
 const dust = makeDust(isMobile ? 30 : 55);
-scene.add(bgMesh, haze, dust);
+scene.add(bgMesh, haze, dust, makeGradeMesh());
 const bugs = createBugs(scene);
 const squirrel = createSquirrel(scene);
 
@@ -2585,6 +2587,25 @@ function textPoint() {
   return null;
 }
 
+// A shaft of sunlight through the canopy rests on the words (as on the store cover); it eases to wherever the text
+// block is and grows with it. With no text it lies softly in the middle of the picture.
+const sun = { x: 0, y: 0, r: 0, k: 0, init: false };
+function updateSunOnWords(dt) {
+  const has = !!textBox;
+  const tx = has ? (textBox.x0 + textBox.x1) / 2 : 0;
+  const ty = has ? (textBox.y0 + textBox.y1) / 2 : H * 0.03;
+  const span = has ? Math.max(textBox.x1 - textBox.x0, textBox.y1 - textBox.y0) : 0;
+  const tr = clamp(Math.max(span * 0.62, Math.min(W, H) * 0.34), 120, Math.max(W, H) * 0.6);
+  const tk = has ? 0.9 : 0.55;
+  if (!sun.init) Object.assign(sun, { x: tx, y: ty, r: tr, k: tk, init: true });
+  const e = 1 - Math.exp(-dt * 1.6);
+  sun.x += (tx - sun.x) * e;
+  sun.y += (ty - sun.y) * e;
+  sun.r += (tr - sun.r) * e;
+  sun.k += (tk - sun.k) * e;
+  shared.uBeam.value[0].set((sun.x + W / 2) * DPR, (sun.y + H / 2) * DPR, sun.k, sun.r * DPR);
+}
+
 function tick(dt) {
   now += dt;
   for (const s of slots) {
@@ -2596,6 +2617,7 @@ function tick(dt) {
   updateWither(dt);
   updateBury(dt);
   updateGlow();
+  updateSunOnWords(dt);
   runLater();
   applyPointer(dt);
   idleLife(dt);
@@ -2744,7 +2766,8 @@ function endPress(e, cancelled) {
   if (whirl.on) releaseWhirl();
   else if (!cancelled && !ptr.longPressed && ptr.maxMove < 12 && now - ptr.downT < 0.35) {
     tapAt(ptr.x, ptr.y);
-    ime.focus({ preventScroll: true });
+    // on touch screens a tap never brings up the keyboard (only the keyboard button does)
+    if (autoFocus) ime.focus({ preventScroll: true });
   }
   if (e.pointerType !== 'mouse') ptr.has = false;
 }
@@ -2755,7 +2778,7 @@ canvas.addEventListener('pointerleave', (e) => {
   if (!ptr.down) ptr.has = false;
 });
 if (!isMobile) {
-  ime.focus({ preventScroll: true });
+  if (autoFocus) ime.focus({ preventScroll: true });
   window.addEventListener('keydown', (e) => {
     if (document.activeElement !== ime && !e.metaKey && !e.ctrlKey) ime.focus({ preventScroll: true });
   });
@@ -2838,11 +2861,11 @@ btnSave.addEventListener('click', () => {
     intro.classList.remove('show'); // fades out; it stays in the page so it can be opened again
     if (!closedOnce) {
       closedOnce = true;
-      // ready to type straight away; on phones this same tap also brings up the keyboard
-      ime.focus({ preventScroll: true });
+      // ready to type straight away on a computer; on touch screens the keyboard only comes up from the keyboard button
+      if (autoFocus) ime.focus({ preventScroll: true });
       const n = ime.value.length;
       try {
-        ime.setSelectionRange(n, n);
+        if (autoFocus) ime.setSelectionRange(n, n);
       } catch (err) {
         /* ignore */
       }

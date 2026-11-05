@@ -824,3 +824,54 @@ export function makeDust(count) {
   pts.renderOrder = 3;
   return pts;
 }
+
+// Final colour grade over the whole picture, as on the store cover: a warmer, slightly brighter image, a soft warm glow
+// in the middle where the words sit and darker edges. Two full-screen passes drawn last:
+//   1) multiply: out = 2 * src * dst, so src 0.5 leaves a pixel as it is and up to 1.0 brightens it (x2 at most)
+//   2) add: the warm glow, already darkened by the same vignette
+export function makeGradeMesh() {
+  const geo = new THREE.PlaneGeometry(2, 2);
+  const common = /* glsl */ `
+    uniform vec2 uRes;
+    // 0 at the centre of the light, 1 at its edge (the centre sits a little above the middle, like the words)
+    float gradeDist(vec2 frag) {
+      vec2 c = vec2(0.48, 0.53) * uRes;
+      vec2 s = vec2(0.55, 0.5) * uRes;
+      return length((frag - c) / s);
+    }
+    float vignette(float d) { return clamp(1.0 - 0.48 * pow(clamp(d - 0.55, 0.0, 1.0), 1.3), 0.0, 1.0); }
+  `;
+  const vert = /* glsl */ `void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+  const mul = new THREE.ShaderMaterial({
+    uniforms: { uRes: shared.uRes },
+    vertexShader: vert,
+    fragmentShader: common + /* glsl */ `
+      void main(){
+        float v = vignette(gradeDist(gl_FragCoord.xy));
+        vec3 gain = vec3(1.06, 1.0, 0.92) * 1.2 * v;
+        gl_FragColor = vec4(gain * 0.5, 1.0);
+      }`,
+    transparent: true, depthTest: false, depthWrite: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+    blendSrc: THREE.DstColorFactor, blendDst: THREE.SrcColorFactor,
+  });
+  const add = new THREE.ShaderMaterial({
+    uniforms: { uRes: shared.uRes },
+    vertexShader: vert,
+    fragmentShader: common + /* glsl */ `
+      void main(){
+        float d = gradeDist(gl_FragCoord.xy);
+        float g = clamp(1.0 - d, 0.0, 1.0);
+        gl_FragColor = vec4((vec3(0.10, 0.06, 0.02) * g * g + vec3(0.012, 0.008, 0.005)) * vignette(d), 1.0); // glow, plus a small lift so the shade never goes murky on phone screens
+      }`,
+    transparent: true, depthTest: false, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const group = new THREE.Group();
+  const a = new THREE.Mesh(geo, mul), b = new THREE.Mesh(geo, add);
+  a.renderOrder = 100;
+  b.renderOrder = 101;
+  a.frustumCulled = b.frustumCulled = false;
+  group.add(a, b);
+  return group;
+}
