@@ -264,18 +264,23 @@ const leafMat = new THREE.ShaderMaterial({
       return !(rel > gap && rel < span - gap);
     }
     void main(){
-      float light = dapple(gl_FragCoord.xy);
+      // cheap rejections first: invisible instances (leaves still waiting to fall, switched-off shadows) and
+      // the transparent parts of each quad never pay for the canopy light below
+      if (vFx.x < 0.002) discard;
       if (outsideFragment(vUv)) discard;
       if (vStat.w < 0.5) {
         // soft cast shadow: blurred silhouette from a lower mip level; faint where there is no direct sun
         float a = texture2D(uAtlas, vAtlasUv, 1.2 + vSoft * 2.8 + vFx.z * 2.0).a;
-        a *= mix(0.55, 0.1, vSoft) * mix(mix(0.3, 1.0, light), 1.0, vFx.z) * (1.0 + vFx.z * 0.85) * vFx.x * (1.0 - vCrush.y) * (1.0 - vCrush.w);
+        a *= mix(0.55, 0.1, vSoft) * (1.0 + vFx.z * 0.85) * vFx.x * (1.0 - vCrush.y) * (1.0 - vCrush.w);
         if (a < 0.004) discard;
+        float light = dapple(gl_FragCoord.xy);
+        a *= mix(mix(0.3, 1.0, light), 1.0, vFx.z);
         gl_FragColor = vec4(0.05, 0.02, 0.008, a);
         return;
       }
       vec4 t = texture2D(uAtlas, vAtlasUv, vFx.y);
       if (t.a < 0.03) discard;
+      float light = dapple(gl_FragCoord.xy);
       float edge = t.r, vein = t.g, mott = t.b;
       // withering stages, all driven by the leaf's age
       float ctype = floor(vStat.y * 0.5);        // colour kind: 0 green, 1 yellow, 2 orange, 3 red
@@ -484,9 +489,16 @@ function layout() {
       }
       const w = s.adv * S;
       if (cw + w > maxW && cur.length) {
-        lines.push({ items: cur, w: cw });
-        cur = [];
-        cw = 0;
+        // wrap at the last space on the line, so a word is never split (unless it has no space before it)
+        let cut = -1;
+        if (s.kind !== 'space') for (let j = cur.length - 1; j > 0; j--) if (cur[j].kind === 'space') {
+          cut = j;
+          break;
+        }
+        const carry = cut > 0 ? cur.splice(cut + 1) : [];
+        lines.push({ items: cur, w: cur.reduce((a, it) => a + it.adv * S, 0) });
+        cur = carry;
+        cw = carry.reduce((a, it) => a + it.adv * S, 0);
       }
       cur.push(s);
       cw += w;
@@ -641,7 +653,7 @@ function addChar(ch) {
       }
       slot.inkOff = (x0 + x1) / 2;
       slot.adv = Math.max(0.5, x1 - x0 + 0.1);
-    } else slot.adv = Math.max(0.3, targets.adv) + 0.08; // Latin keeps its own advance plus a little tracking
+    } else slot.adv = Math.max(0.3, targets.adv) + 0.02; // Latin keeps its own advance plus a hair of tracking
   }
   slots.push(slot);
   layout();
@@ -2177,7 +2189,8 @@ function moundAt(x, y) {
 }
 
 // one leaf of the heap: falls from the canopy onto a point of it, resting at the heap's height there
-function pileLeaf(delay, S) {
+// where a heap leaf lands: a random point inside the heap, at the heap's height there
+function pileSpot() {
   const b = bury.box;
   let x = 0, y = 0, d = 0;
   for (let k = 0; k < 30; k++) {
@@ -2186,19 +2199,28 @@ function pileLeaf(delay, S) {
     d = moundAt(x, y);
     if (d <= 1) break;
   }
-  const l = newLeaf(makeLook());
-  l.pile = true;
-  l.gx = x;
-  l.gy = y;
   // even height across the heap, a little lumpy, tapering only at the rim
   const rim = 1 - smooth(0.7, 1, d);
-  l.gz = 3 + (0.35 + 0.65 * rim) * 22 * (0.8 + 0.4 * Math.sin(x * 0.03 + y * 0.02) * Math.cos(y * 0.025));
-  l.gsize = (S || unitS) * rand(0.11, 0.18) * l.sizeMul;
+  const gz = 3 + (0.35 + 0.65 * rim) * 22 * (0.8 + 0.4 * Math.sin(x * 0.03 + y * 0.02) * Math.cos(y * 0.025));
+  return { x, y, gz };
+}
+
+// one leaf of the heap: falls from the canopy onto its spot of the heap
+function pileLeaf(delay, S, spot = pileSpot()) {
+  const l = newLeaf(makeLook());
+  l.pile = true;
+  l.gx = spot.x;
+  l.gy = spot.y;
+  l.gz = spot.gz;
+  l.gsize = (S || unitS) * rand(0.14, 0.22) * l.sizeMul; // fewer, slightly bigger leaves make the same thick heap
   l.lrot = rand(0, TAU);
   l.tiltX = rand(-0.5, 0.5);
   l.tiltY = rand(-0.5, 0.5);
   startFall(l, delay, randWind());
   l.fl.D = rand(0.6, 0.75); // a quick, dense shower
+  // they come from lower in the canopy, so they aren't drawn huge (and expensive) while falling
+  l.fl.zH = rand(170, 300);
+  l.z = l.fl.zH;
   leaves.push(l);
   staticDirty = true;
   return l;
@@ -2230,16 +2252,17 @@ function startBury() {
   let inside = 0;
   for (let k = 0; k < 600; k++) if (moundAt(rand(x0, x1), rand(y0, y1)) <= 1) inside++;
   const area = (x1 - x0) * (y1 - y0) * (inside / 600);
-  const BURY_DENSITY = 1 / 88; // leaves per square pixel: the heap is equally thick for one word or a whole sentence
-  const n = Math.round(Math.min(area * BURY_DENSITY, isMobile ? 2600 : 4200)); // the cap is only a safety limit
-  // add lower leaves first so the upper ones of the heap are drawn on top
-  const made = [];
-  for (let i = 0; i < n; i++) made.push(pileLeaf(0, unitS));
-  made.sort((p, q) => p.gz - q.gz);
-  leaves = leaves.filter((l) => !l.pile).concat(made);
-  made.forEach((l, i) => {
-    l.fl.t0 = now + (i / n) * 0.75 + rand(0, 0.1); // lower layers land first; the last ones land ~1.6 s in
-  });
+  const BURY_DENSITY = 1 / 135; // leaves per square pixel: the heap is equally thick for one word or a whole sentence
+  const n = Math.round(Math.min(area * BURY_DENSITY, isMobile ? 1500 : 2600)); // the cap is only a safety limit
+  // choose every spot now, lowest layers first (so the upper leaves of the heap are drawn on top), but create
+  // the leaves themselves a slice per frame over the first few frames, so the double tap never stalls a frame
+  const spots = [];
+  for (let i = 0; i < n; i++) spots.push(pileSpot());
+  spots.sort((p, q) => p.gz - q.gz);
+  leaves = leaves.filter((l) => !l.pile);
+  bury.queue = spots.map((sp, i) => ({ sp, t0: now + (i / n) * 0.75 + rand(0, 0.1) })); // lower layers land first
+  bury.qi = 0;
+  feedBury();
   playArrive(1, 0.85); // the heap's leaves coming down: the breeze, then the gathering as they land
 }
 
@@ -2274,8 +2297,21 @@ function blowAway2(l) {
   l.vy = rand(-40, 40);
 }
 
+// create the next slice of the heap's leaves (each keeps its planned landing time)
+function feedBury() {
+  const q = bury.queue;
+  if (!q || bury.qi >= q.length) return;
+  const per = Math.ceil(q.length / 8);
+  for (let k = 0; k < per && bury.qi < q.length; k++, bury.qi++) {
+    const it = q[bury.qi];
+    const l = pileLeaf(0, unitS, it.sp);
+    l.fl.t0 = it.t0;
+  }
+}
+
 function updateBury(dt) {
   if (!bury.on) return;
+  feedBury();
   const t = now - bury.t0;
   const b = bury.box;
   if (bury.phase === 'fall' && t > BURY_FALL) bury.phase = 'rest';
@@ -2442,6 +2478,11 @@ function upload() {
   const crush = attr.crush.array;
   for (let i = 0; i < n; i++) {
     const l = leaves[i];
+    if (l.dead) {
+      // gone, waiting for the next clean-up: simply not drawn
+      attr.fx.array[i * 8] = attr.fx.array[i * 8 + 4] = 0;
+      continue;
+    }
     // top-down: the higher a leaf is, the closer it is to the camera
     const s = l.size * (1 + l.z * 0.0017);
     const o = i * 32;
@@ -2479,7 +2520,7 @@ function upload() {
     // no shadows while a leaf is still in the air; only a contact shadow as it touches down
     const airborne = l.state === FALL || l.state === FREE || l.state === VORTEX || l.state === SWIRL;
     const shadowFade = airborne ? 1 - smooth(4, 30, l.z) : 1;
-    fx[f] = l.alpha * l.dim * shadowFade;
+    fx[f] = l.alpha * l.dim * shadowFade * (l.pile && l.state === REST && l.gz > 9 ? 0 : 1);
     fx[f + 4] = l.alpha * l.dim;
     fx[f + 1] = fx[f + 5] = clamp((l.z - 140) / 380, 0, 1) * 2.2; // defocus near the camera
     if (l.state === SINK) fx[f + 1] = fx[f + 5] = ((l.soil - PRE_SOIL) / (1 - PRE_SOIL)) * 2.2; // detail softens as it turns into soil (from 0, no pop)
@@ -2558,8 +2599,12 @@ function tick(dt) {
   runLater();
   applyPointer(dt);
   idleLife(dt);
-  let anyDead = false;
+  let deadNow = 0;
   for (const l of leaves) {
+    if (l.dead) {
+      deadNow++;
+      continue; // finished leaves wait (invisible) for the next clean-up
+    }
     l.px = l.x;
     l.py = l.y;
     if (l.state === FALL) updateFall(l);
@@ -2573,11 +2618,14 @@ function tick(dt) {
       l.vxEst = (l.x - l.px) / dt;
       l.vyEst = (l.y - l.py) / dt;
     }
-    if (l.dead) anyDead = true;
+    if (l.dead) deadNow++;
   }
-  if (anyDead) {
+  // finished leaves are cleared out in batches rather than every frame: each clean-up re-sends every leaf's
+  // fixed data to the GPU, which is what used to make the wind after a burial stutter
+  if (deadNow && (deadNow > 300 || now - lastCompact > 0.6)) {
     leaves = leaves.filter((l) => !l.dead);
     staticDirty = true;
+    lastCompact = now;
   }
   const env = { W, H, unit: clamp(Math.min(W, H) * 0.045, 22, 38), ptr, whirl, textPoint, nudge, wiggle, stamp: stampPrints, now };
   updateDust(dt);
@@ -2587,6 +2635,7 @@ function tick(dt) {
   squirrel.update(dt, now, env);
 }
 
+let lastCompact = 0;
 let last = performance.now();
 let frameMs = 0;
 function frame(t) {
