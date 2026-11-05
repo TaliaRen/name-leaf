@@ -1,5 +1,7 @@
 # Leaf Letters
 
+**Try it: <https://taliaren.github.io/name-leaf/>**
+
 An autumn forest floor seen from above. Whatever you type is spelled out in fallen leaves — maple, ginkgo, oak and birch — that drift down from the canopy and gather into letters. Everything is drawn and voiced in the browser: the leaves, the dappled sunlight through the trees, the little creatures on the ground and every sound.
 
 Works with Latin letters and Chinese characters, on desktop and on phones.
@@ -19,6 +21,12 @@ Works with Latin letters and Chinese characters, on desktop and on phones.
 | Enter | Starts a new line |
 
 On desktop, gliding the mouse over the ground turns the leaves it brushes. The buttons at the bottom show the tips again, bring up the keyboard (on phones) and save the scene as a PNG.
+
+## Play online
+
+Open <https://taliaren.github.io/name-leaf/> in a desktop or mobile browser - nothing to install. The first visit
+downloads about 3 MB of fonts, so the letters may take a moment to appear on a slow connection. Sound starts after
+your first tap or key press (browsers don't allow audio before that).
 
 ## Run it locally
 
